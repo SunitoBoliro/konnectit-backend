@@ -5,3 +5,6 @@ class User(BaseModel):
     username: str
     email: EmailStr
     hashed_password: str
+
+
+# tewer
