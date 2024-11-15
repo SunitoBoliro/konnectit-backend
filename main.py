@@ -5,8 +5,25 @@ from schemas import UserCreate, UserLogin, UserResponse
 from db import user_collection, serialize_user
 from auth import hash_password, verify_password
 from bson import ObjectId
+from fastapi.middleware.cors import CORSMiddleware
+
+
 
 app = FastAPI()
+
+# Configure allowed origins (replace with your frontend's URL)
+origins = [
+    "http://localhost:5173",  # React frontend URL
+    "https://your-frontend-domain.com",  # Production domain if needed
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # Allow only specific origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
+    allow_headers=["*"],  # Allow all headers
+)
 
 @app.post("/register", response_model=UserResponse)
 async def register_user(user: UserCreate):
