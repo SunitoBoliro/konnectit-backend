@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import hashlib
 import time
 from pydantic import BaseModel
+from fastapi.responses import HTMLResponse
+from typing import List, Dict
 
 from fastapi import FastAPI, HTTPException, Body
 import hashlib
@@ -18,6 +20,7 @@ app = FastAPI()
 # CORS configuration remains the same
 origins = [
     "http://localhost:5173",
+    "http://192.168.18.232:5173",
     "https://your-frontend-domain.com",
 ]
 app.add_middleware(
@@ -27,6 +30,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+chats = [
+    {"id": 1, "name": "Chat 1", "message": "Hello!", "time": "10:00 AM"},
+    {"id": 2, "name": "Chat 2", "message": "Hi there!", "time": "10:05 AM"},
+]
+
+messages = {
+    1: [{"sender": "user", "text": "Hi!"}, {"sender": "bot", "text": "How can I assist you?"}],
+    2: [{"sender": "user", "text": "Hello!"}, {"sender": "bot", "text": "How are you?"}],
+}
+
+
+
 
 @app.post("/register", response_model=UserResponse)
 async def register_user(user: UserCreate):
@@ -79,6 +96,29 @@ async def validate_token(request: Request):
     except Exception as e:
         return {"isValid": False, "message": str(e)}
     
+
+
+
+# Define the message model for sending messages
+class Message(BaseModel):
+    message: str
+
+# API to fetch all chats
+@app.get("/chats")
+async def get_chats():
+    return chats
+
+# API to send a message to a specific chat
+@app.post("/chats/{chat_id}/messages")
+async def send_message(chat_id: int, message: Message):
+    if chat_id not in messages:
+        messages[chat_id] = []
+    messages[chat_id].append({"sender": "user", "text": message.message})
+    # Simulate a bot reply
+    bot_reply = "Bot reply to: " + message.message
+    messages[chat_id].append({"sender": "bot", "text": bot_reply})
+    return {"reply": bot_reply}
+
     
 connected_clients = []
 @app.websocket("/ws")
