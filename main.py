@@ -1,7 +1,7 @@
-from fastapi import FastAPI, HTTPException, Depends, Body, Request
+from fastapi import FastAPI, HTTPException, Depends, Body, Request ,WebSocket, WebSocketDisconnect
 from models import User
 from schemas import UserCreate, UserLogin, UserResponse
-from db import user_collection, serialize_user
+from db import user_collection, serialize_user , messages_collection
 from auth import hash_password, verify_password, generate_token, validate_token
 from bson import ObjectId
 from fastapi.middleware.cors import CORSMiddleware
@@ -78,3 +78,18 @@ async def validate_token(request: Request):
         return {"isValid": True}
     except Exception as e:
         return {"isValid": False, "message": str(e)}
+    
+    
+connected_clients = []
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    connected_clients.append(websocket)
+    try:
+        while True:
+            data = await websocket.receive_json()
+            messages_collection.insert_one(data)  # Store in DB
+            for client in connected_clients:
+                await client.send_json(data)
+    except WebSocketDisconnect:
+        connected_clients.remove(websocket)
