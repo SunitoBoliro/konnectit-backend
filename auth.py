@@ -1,30 +1,37 @@
-import bcrypt
-import hashlib
-import time
+# auth.py
+from datetime import datetime, timedelta
+from typing import Optional
+from jose import JWTError, jwt
+from bson import ObjectId
+from db import user_collection
+from utils import hash_password, verify_password
 
-# Hash the password
-def hash_password(password: str) -> str:
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
+# Secret key for signing the JWT
+SECRET_KEY = "ahsanahmedkhan"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
-# Verify password
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
 
-# Generate SHA1 token with expiry
-def generate_token(email: str) -> str:
-    expiry_time = int(time.time()) + 3600  # 1 hour from now
-    raw_token = f"{email}{expiry_time}".encode("utf-8")
-    sha1_token = hashlib.sha1(raw_token).hexdigest()
-    return f"{sha1_token}:{expiry_time}"
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
 
-# Validate token
-def validate_token(token: str) -> bool:
+
+async def validate_token(token: str):
     try:
-        sha1_token, expiry_time = token.split(":")
-        expiry_time = int(expiry_time)
-        if expiry_time < int(time.time()):
-            return False  # Token expired
-        return True  # Token valid
-    except ValueError:
-        return False  # Invalid token format
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            return {"isValid": False, "message": "Invalid token"}
+        user = await user_collection.find_one({"email": email})  # Ensure this is awaited
+        if not user:
+            return {"isValid": False, "message": "User not found"}
+        return {"isValid": True, "email": email, "user_id": str(user["_id"])}
+    except JWTError as e:
+        return {"isValid": False, "message": str(e)}
