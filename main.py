@@ -25,6 +25,7 @@ app = FastAPI()
 origins = [
     "http://localhost:5173",
     "http://192.168.18.232:5173",
+    "http://192.168.23.107:5173/",
     "https://your-frontend-domain.com",
 ]
 app.add_middleware(
@@ -137,8 +138,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         active_connections[current_user_email] = websocket
 
         # Mark user as online and update status
-        user_status[current_user_email] = {"online": True, "last_seen": None}
-        print(f"{current_user_email} is now online")
+        # user_status[current_user_email] = {"online": True, "last_seen": None}
+        # print(f"{current_user_email} is now online")
 
         try:
             while True:
@@ -150,20 +151,20 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
                 await broadcast(message)
 
                 # Update user activity
-                user_status[current_user_email] = {
-                    "online": True,
-                    "last_seen": datetime.utcnow(),
-                }
+                # user_status[current_user_email] = {
+                #     "online": True,
+                #     "last_seen": datetime.utcnow(),
+                # }
         except WebSocketDisconnect:
             logging.info(f"User {current_user_email} disconnected.")
         finally:
             # Handle disconnection: mark user as offline
             active_connections.pop(current_user_email, None)
-            user_status[current_user_email] = {
-                "online": False,
-                "last_seen": datetime.utcnow(),
-            }
-            print(f"{current_user_email} went offline at {user_status[current_user_email]['last_seen']}")
+            # user_status[current_user_email] = {
+            #     "online": False,
+            #     "last_seen": datetime.utcnow(),
+            # }
+            # print(f"{current_user_email} went offline at {user_status[current_user_email]['last_seen']}")
     except JWTError as e:
         await websocket.close(code=1008, reason="Invalid token")
         logging.error(f"JWTError: {e}")
