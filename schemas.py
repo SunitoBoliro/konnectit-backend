@@ -30,7 +30,8 @@ class UserLogin(BaseModel):
 
 
 class UserResponse(BaseModel):
-    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    # id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    id: str
     username: str
     email: EmailStr
 
