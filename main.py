@@ -1,9 +1,11 @@
 # main.py
+import asyncio
 from datetime import timedelta, datetime
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from pydantic import EmailStr
+from sse_starlette import EventSourceResponse
 from starlette import status
 from models import User, Message
 from db import user_collection, message_collection, serialize_user, serialize_message, seed_users
@@ -166,7 +168,6 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         logging.error(f"WebSocket Error: {e}")
 
 
-
 async def broadcast(message: dict):
     """
     This function broadcasts the message to both users in the chat.
@@ -199,6 +200,7 @@ async def broadcast(message: dict):
                 # Clean up broken connections
                 active_connections.pop(user_email, None)
 
+
 @app.get("/user-status/{email}")
 async def get_user_status(email: EmailStr):
     """API to get a user's online status and last seen time."""
@@ -213,6 +215,38 @@ async def get_user_status(email: EmailStr):
     else:
         raise HTTPException(status_code=404, detail="User not found")
 
+@app.get("/sse/user-status/{email}")
+async def sse_user_status(email: EmailStr):
+    async def event_generator():
+        while True:
+            if email not in user_status:
+                yield {
+                    "data": "User not found",
+                    "event": "error",
+                }
+                break
+            stats = user_status[email]
+            yield {
+                "data": {
+                    "online": stats["online"],
+                    "last_seen": stats["last_seen"].isoformat() if stats["last_seen"] else None,
+                },
+                "event": "status_update",
+            }
+            await asyncio.sleep(5)  # Send an update every 5 seconds
+
+    return EventSourceResponse(event_generator())
+
+@app.post("/logout/{email}")
+async def logout_user(email: EmailStr):
+    """API to update a user's last seen time on logout."""
+    if email in user_status:
+        user_status[email]["online"] = False
+        user_status[email]["last_seen"] = datetime.now()
+        logging.debug(f"Updated user {email} last seen time: {user_status[email]['last_seen']}")
+        return {"detail": "Successfully logged out"}
+    else:
+        raise HTTPException(status_code=404, detail="User not found")
 
 @app.get("/messages/{chatId}/{sender_email}")
 async def get_messages(chatId: EmailStr, sender_email: EmailStr, current_user: User = Depends(get_current_user)):
