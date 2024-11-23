@@ -1,22 +1,23 @@
 # main.py
 import asyncio
-from datetime import timedelta, datetime
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
-from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+import logging
+from datetime import datetime
+from typing import List, Dict
+
+from fastapi import FastAPI, HTTPException, WebSocket, Depends, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import EmailStr
 from sse_starlette import EventSourceResponse
-from starlette import status
-from models import User, Message
-from db import user_collection, message_collection, serialize_user, serialize_message, seed_users
-from auth import create_access_token, validate_token, SECRET_KEY, ALGORITHM
-from bson import ObjectId
-from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict, Optional
-import json
-import logging
-from schemas import UserCreate, UserLogin, UserResponse, MessageCreate, MessageResponse, PyObjectId
-from utils import hash_password, verify_password
+
+from db import user_collection, serialize_user
+from get_current_user import get_current_user
+from get_messages import get_messages
+from login_user import login_user
+from models import User
+from register_user import register_user
+from schemas import UserResponse, UserCreate, UserLogin
+from validate_token_endpoint import validate_token_endpoint
+from websocket_config import websocket_endpoint, user_status
 
 app = FastAPI()
 
@@ -41,164 +42,34 @@ app.add_middleware(
 # async def startup_event():
 #     await seed_users()
 
-
-async def get_current_user(token: str = Query(...)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Invalid token",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        email: str = payload.get("sub")
-        if email is None:
-            raise credentials_exception
-        user = await user_collection.find_one({"email": email})
-        if user is None:
-            raise credentials_exception
-        return user
-    except JWTError:
-        raise credentials_exception
-
+active_connections: Dict[EmailStr, WebSocket] = {}
+# user_status: Dict[EmailStr, dict] = {}  # Tracks online status and last seen time
+active_webrtc_connections: Dict[str, WebSocket] = {}
+webrtc_sessions: Dict[str, Dict[EmailStr, bool]] = {}
 
 @app.post("/register", response_model=UserResponse)
-async def register_user(user: UserCreate):
-    existing_user = await user_collection.find_one({"email": user.email})
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
-
-    hashed_password = hash_password(user.password)
-    new_user = User(username=user.username, email=user.email, hashed_password=hashed_password, chats=[])
-    result = await user_collection.insert_one(new_user.dict())
-    return serialize_user({**new_user.dict(), "_id": result.inserted_id})
+async def register(user: UserCreate):
+    return await register_user(user)
 
 
 @app.post("/login")
-async def login_user(user: UserLogin):
-    db_user = await user_collection.find_one({"email": user.email})
-    if not db_user or not verify_password(user.password, db_user["hashed_password"]):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-
-    # Generate JWT token
-    access_token_expires = timedelta(minutes=60)
-    access_token = create_access_token(
-        data={"sub": db_user["email"]}, expires_delta=access_token_expires
-    )
-
-    # Return token and user info
-    return {
-        "token": access_token,
-        "user": serialize_user(db_user),
-        "userId": str(db_user["_id"])  # Include user ID in the response
-    }
+async def login(user: UserLogin):
+    return await login_user(user)
 
 
 @app.get("/validate")
-async def validate_token_endpoint(token: str = Query(...)):
-    try:
-        # Decode the token using the secret key and algorithm
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        logging.debug(f"Token payload: {payload}")
-        return {"isValid": True}  # If no exception is raised, the token is valid
-    except JWTError:
-        logging.error("Invalid token")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-
-# Dictionary to store active WebSocket connections and user status
-active_connections: Dict[EmailStr, WebSocket] = {}
-user_status: Dict[EmailStr, dict] = {}  # Tracks online status and last seen time
+async def validate_token(token: str = Query(...)):
+    return await validate_token_endpoint(token)
 
 
 @app.websocket("/ws/{token}")
-async def websocket_endpoint(websocket: WebSocket, token: str):
-    try:
-        # Decode the token to get the current user
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        current_user_email = payload.get("sub")
-        if not current_user_email:
-            await websocket.close(code=1008, reason="Invalid token")
-            return
-
-        # Accept the WebSocket connection
-        await websocket.accept()
-        active_connections[current_user_email] = websocket
-        logging.info(f"User {current_user_email} connected. Active connections: {list(active_connections.keys())}")
-
-        # Mark user as online and update status
-        user_status[current_user_email] = {"online": True, "last_seen": None}
-        print(f"{current_user_email} is now online")
-
-        try:
-            while True:
-                # Receive messages and update activity timestamp
-                data = await websocket.receive_text()
-                message = json.loads(data)
-                message["sender"] = current_user_email
-                await message_collection.insert_one(message)
-                await broadcast(message)
-
-                # Update user activity
-                user_status[current_user_email] = {
-                    "online": True,
-                    "last_seen": datetime.utcnow(),
-                }
-        except WebSocketDisconnect:
-            logging.info(f"User {current_user_email} disconnected.")
-        finally:
-            # Handle disconnection: mark user as offline
-            active_connections.pop(current_user_email, None)
-            logging.info(
-                f"User {current_user_email} disconnected. Active connections: {list(active_connections.keys())}")
-
-            user_status[current_user_email] = {
-                "online": False,
-                "last_seen": datetime.utcnow(),
-            }
-            print(f"{current_user_email} went offline at {user_status[current_user_email]['last_seen']}")
-    except JWTError as e:
-        await websocket.close(code=1008, reason="Invalid token")
-        logging.error(f"JWTError: {e}")
-    except Exception as e:
-        await websocket.close(code=1011, reason="Internal server error")
-        logging.error(f"WebSocket Error: {e}")
+async def websocket_communication(websocket: WebSocket, token: str):
+    return await websocket_endpoint(websocket, token)
 
 
-async def broadcast(message: dict):
-    """
-    This function broadcasts the message to both users in the chat.
-    The message chatId is now the email of the recipient, so we need to handle both users involved.
-    """
-    chat_id = message.get("chatId")
-    if not chat_id:
-        logging.warning("Message without chatId received. Skipping broadcast.")
-        return
-
-    # Assuming `chatId` corresponds to the recipient's email. Get both participants:
-    user_emails = [message["sender"], chat_id]  # Both sender and recipient need to receive the message
-
-    # Debugging Logs
-    logging.debug(f"Broadcasting message to users: {user_emails}")
-
-    if "_id" in message:
-        message["_id"] = str(message["_id"])
-
-    # Send message to each user connected
-    for user_email in user_emails:
-        if user_email in active_connections:
-            try:
-                # Send the message to the user
-                await active_connections[user_email].send_text(json.dumps(message))
-                logging.info(f"Message sent to {user_email}")
-            except Exception as e:
-                # Error handling for failed message delivery
-                logging.error(f"Error sending message to {user_email}: {e}")
-                # Clean up broken connections
-                active_connections.pop(user_email, None)
+# @app.websocket("/webrtc/{token}")
+# async def webrtc_websocket_connection(websocket: WebSocket, token: str):
+#     await webrtc_websocket_endpoint(websocket, token)
 
 
 @app.get("/user-status/{email}")
@@ -214,6 +85,7 @@ async def get_user_status(email: EmailStr):
         }
     else:
         raise HTTPException(status_code=404, detail="User not found")
+
 
 @app.get("/sse/user-status/{email}")
 async def sse_user_status(email: EmailStr):
@@ -237,6 +109,7 @@ async def sse_user_status(email: EmailStr):
 
     return EventSourceResponse(event_generator())
 
+
 @app.post("/logout/{email}")
 async def logout_user(email: EmailStr):
     """API to update a user's last seen time on logout."""
@@ -248,22 +121,10 @@ async def logout_user(email: EmailStr):
     else:
         raise HTTPException(status_code=404, detail="User not found")
 
+
 @app.get("/messages/{chatId}/{sender_email}")
-async def get_messages(chatId: EmailStr, sender_email: EmailStr, current_user: User = Depends(get_current_user)):
-    try:
-        logging.info(f"Fetching messages for chatId={chatId} and sender_email={sender_email}")
-        messages = await message_collection.find({
-            "$or": [
-                {"chatId": chatId, "sender": sender_email},
-                {"chatId": sender_email, "sender": chatId}
-            ]
-        }).to_list(length=None)
-        serialized_messages = [serialize_message(msg) for msg in messages]
-        logging.debug(f"Fetched messages: {serialized_messages}")
-        return serialized_messages
-    except Exception as e:
-        logging.error(f"Error fetching messages: {e}")
-        raise HTTPException(status_code=500, detail=f"Error fetching messages: {e}")
+async def messages(chatId: EmailStr, sender_email: EmailStr, current_user: User = Depends(get_current_user)):
+    return await get_messages(chatId, sender_email, current_user)
 
 
 @app.get("/users", response_model=List[UserResponse])
