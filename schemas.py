@@ -40,6 +40,7 @@ class UserResponse(BaseModel):
 
 
 class MessageCreate(BaseModel):
+    type: str
     chatId: int
     content: str
     timestamp: str
