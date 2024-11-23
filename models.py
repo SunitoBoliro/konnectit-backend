@@ -21,7 +21,7 @@ class PyObjectId(ObjectId):
 
 
 class User(BaseModel):
-    id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
+    # id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
     username: str
     email: EmailStr
     hashed_password: str

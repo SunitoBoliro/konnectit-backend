@@ -1,9 +1,11 @@
 # main.py
-from datetime import timedelta
+import asyncio
+from datetime import timedelta, datetime
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, Depends
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from pydantic import EmailStr
+from sse_starlette import EventSourceResponse
 from starlette import status
 from models import User, Message
 from db import user_collection, message_collection, serialize_user, serialize_message, seed_users
@@ -19,7 +21,7 @@ from utils import hash_password, verify_password
 app = FastAPI()
 
 # Configure logging
-# logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
 
 # CORS configuration
 origins = [
@@ -37,9 +39,9 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-async def startup_event():
-    await seed_users()
+# @app.on_event("startup")
+# async def startup_event():
+#     await seed_users()
 
 
 async def get_current_user(token: str = Query(...)):
@@ -116,8 +118,6 @@ async def validate_token_endpoint(token: str = Query(...)):
         )
 
 
-from datetime import datetime, timedelta
-
 # Dictionary to store active WebSocket connections and user status
 active_connections: Dict[EmailStr, WebSocket] = {}
 user_status: Dict[EmailStr, dict] = {}  # Tracks online status and last seen time
@@ -136,6 +136,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         # Accept the WebSocket connection
         await websocket.accept()
         active_connections[current_user_email] = websocket
+        logging.info(f"User {current_user_email} connected. Active connections: {list(active_connections.keys())}")
 
         # Mark user as online and update status
         # user_status[current_user_email] = {"online": True, "last_seen": None}
@@ -160,11 +161,14 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         finally:
             # Handle disconnection: mark user as offline
             active_connections.pop(current_user_email, None)
-            # user_status[current_user_email] = {
-            #     "online": False,
-            #     "last_seen": datetime.utcnow(),
-            # }
-            # print(f"{current_user_email} went offline at {user_status[current_user_email]['last_seen']}")
+            logging.info(
+                f"User {current_user_email} disconnected. Active connections: {list(active_connections.keys())}")
+
+            user_status[current_user_email] = {
+                "online": False,
+                "last_seen": datetime.utcnow(),
+            }
+            print(f"{current_user_email} went offline at {user_status[current_user_email]['last_seen']}")
     except JWTError as e:
         await websocket.close(code=1008, reason="Invalid token")
         logging.error(f"JWTError: {e}")
@@ -174,31 +178,45 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
 
 
 async def broadcast(message: dict):
-    print(message)
-    chat_id = message["chatId"]
-    users_in_chat = await user_collection.find({"chats": chat_id}).to_list(length=None)
-    user_emails = [user["email"] for user in users_in_chat]
+    """
+    This function broadcasts the message to both users in the chat.
+    The message chatId is now the email of the recipient, so we need to handle both users involved.
+    """
+    chat_id = message.get("chatId")
+    if not chat_id:
+        logging.warning("Message without chatId received. Skipping broadcast.")
+        return
+
+    # Assuming `chatId` corresponds to the recipient's email. Get both participants:
+    user_emails = [message["sender"], chat_id]  # Both sender and recipient need to receive the message
+
+    # Debugging Logs
+    logging.debug(f"Broadcasting message to users: {user_emails}")
 
     if "_id" in message:
         message["_id"] = str(message["_id"])
 
+    # Send message to each user connected
     for user_email in user_emails:
         if user_email in active_connections:
             try:
+                # Send the message to the user
                 await active_connections[user_email].send_text(json.dumps(message))
                 logging.info(f"Message sent to {user_email}")
             except Exception as e:
-                logging.error(f"Error sending to {user_email}: {e}")
-                del active_connections[user_email]
+                # Error handling for failed message delivery
+                logging.error(f"Error sending message to {user_email}: {e}")
+                # Clean up broken connections
+                active_connections.pop(user_email, None)
 
 
 @app.get("/user-status/{email}")
 async def get_user_status(email: EmailStr):
     """API to get a user's online status and last seen time."""
-    print("User Status=>", user_status)
+    logging.debug(f"User Status=> {user_status}")
     if email in user_status:
         stats = user_status[email]
-        print("Stats=>", stats)
+        logging.debug(f"Stats=> {stats}")
         return {
             "online": stats["online"],
             "last_seen": stats["last_seen"].isoformat() if stats["last_seen"] else None,
@@ -206,43 +224,79 @@ async def get_user_status(email: EmailStr):
     else:
         raise HTTPException(status_code=404, detail="User not found")
 
+@app.get("/sse/user-status/{email}")
+async def sse_user_status(email: EmailStr):
+    async def event_generator():
+        while True:
+            if email not in user_status:
+                yield {
+                    "data": "User not found",
+                    "event": "error",
+                }
+                break
+            stats = user_status[email]
+            yield {
+                "data": {
+                    "online": stats["online"],
+                    "last_seen": stats["last_seen"].isoformat() if stats["last_seen"] else None,
+                },
+                "event": "status_update",
+            }
+            await asyncio.sleep(5)  # Send an update every 5 seconds
+
+    return EventSourceResponse(event_generator())
+
+@app.post("/logout/{email}")
+async def logout_user(email: EmailStr):
+    """API to update a user's last seen time on logout."""
+    if email in user_status:
+        user_status[email]["online"] = False
+        user_status[email]["last_seen"] = datetime.now()
+        logging.debug(f"Updated user {email} last seen time: {user_status[email]['last_seen']}")
+        return {"detail": "Successfully logged out"}
+    else:
+        raise HTTPException(status_code=404, detail="User not found")
 
 @app.get("/messages/{chatId}/{sender_email}")
 async def get_messages(chatId: EmailStr, sender_email: EmailStr, current_user: User = Depends(get_current_user)):
     try:
+        logging.info(f"Fetching messages for chatId={chatId} and sender_email={sender_email}")
         messages = await message_collection.find({
             "$or": [
                 {"chatId": chatId, "sender": sender_email},
                 {"chatId": sender_email, "sender": chatId}
             ]
         }).to_list(length=None)
-        # print([serialize_message(msg) for msg in messages])
-        return [serialize_message(msg) for msg in messages]
+        serialized_messages = [serialize_message(msg) for msg in messages]
+        logging.debug(f"Fetched messages: {serialized_messages}")
+        return serialized_messages
     except Exception as e:
+        logging.error(f"Error fetching messages: {e}")
         raise HTTPException(status_code=500, detail=f"Error fetching messages: {e}")
 
 
 @app.get("/users", response_model=List[UserResponse])
 async def get_users(current_user: User = Depends(get_current_user)):
     users = await user_collection.find({}).to_list(length=None)
+    if "_id" in users:
+        users["_id"] = str(users["_id"])
     return [serialize_user(user) for user in users]
 
 
-@app.post("/chats/{user_id}/join")
-async def join_chat(user_id: PyObjectId, chat_data: dict, current_user: User = Depends(get_current_user)):
-    logging.debug(f"User ID: {user_id}, Chat Data: {chat_data}")
-    print(f"User ID: {user_id}, Chat Data: {chat_data}")
+@app.post("/chats/{email}/join")
+async def join_chat(email: EmailStr, chat_data: dict, current_user: User = Depends(get_current_user)):
+    logging.debug(f"Sender: {email}, Chat Data: {chat_data}")
+    print(f"Sender: {email}, Chat Data: {chat_data}")
     try:
         chat_id = chat_data.get("chatId")
         if not chat_id:
             raise HTTPException(status_code=400, detail="Chat ID is required")
 
         result = await user_collection.update_one(
-            {"_id": user_id},
+            {"email": email},
             {"$addToSet": {"chats": chat_id}}
         )
         if result.modified_count == 0:
-            # raise HTTPException(status_code=400, detail="User not found or already in chat")
             return {"detail": "User not found or already in chat"}
         return {"detail": "Chat joined successfully"}
     except Exception as e:
