@@ -129,12 +129,34 @@ async def messages(chatId: EmailStr, sender_email: EmailStr, current_user: User 
     return await get_messages(chatId, sender_email, current_user)
 
 
-@app.get("/users", response_model=List[UserResponse])
-async def get_users(current_user: User = Depends(get_current_user)):
-    users = await user_collection.find({}).to_list(length=None)
-    if "_id" in users:
-        users["_id"] = str(users["_id"])
-    return [serialize_user(user) for user in users]
+# @app.get("/users", response_model=List[UserResponse])
+# async def get_users(current_user: User = Depends(get_current_user)):
+#     users = await user_collection.find({}).to_list(length=None)
+#     if "_id" in users:
+#         users["_id"] = str(users["_id"])
+#     return [serialize_user(user) for user in users]
+
+@app.get("/users/{email}", response_model=List[UserResponse])
+
+
+async def get_users(email: EmailStr):
+    # Fetch the user with the specified email
+    user = await user_collection.find_one({"email": email})
+    if not user:
+        return []  # Return an empty list if the user is not found
+
+    # Convert the "_id" field to a string for the found user
+    user["_id"] = str(user["_id"])
+
+    # Fetch all users from the collection
+    additional_chat_users = await user_collection.find({}).to_list(length=None)
+
+    # Filter and serialize users whose email matches any chats in the user's "chats"
+    return [
+        serialize_user(chat_user)
+        for chat_user in additional_chat_users
+        if any(chat in chat_user['email'] for chat in user.get('chats', []))
+    ]
 
 
 @app.post("/chats/{email}/join")
@@ -145,6 +167,9 @@ async def join_chat(email: EmailStr, chat_data: dict, current_user: User = Depen
         chat_id = chat_data.get("chatId")
         if not chat_id:
             raise HTTPException(status_code=400, detail="Chat ID is required")
+        user_check = await user_collection.find({"email": chat_id}).to_list(length=None)
+        if not user_check:
+            return []
 
         result = await user_collection.update_one(
             {"email": email},
