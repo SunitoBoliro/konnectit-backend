@@ -71,6 +71,26 @@ async def websocket_communication(websocket: WebSocket, token: str):
 # async def webrtc_websocket_connection(websocket: WebSocket, token: str):
 #     await webrtc_websocket_endpoint(websocket, token)
 
+call_connections = []
+
+# @app.get("/calllogs/{}/{}/{}/{}/{}")
+
+@app.get("/room/{sender}/{receiver}")
+async def room_id(sender: EmailStr, receiver: EmailStr):
+    # Print the sender and receiver for debugging
+    print(sender, receiver)
+
+    # Sort the sender and receiver to ensure the order is consistent
+    sorted_users = sorted([sender, receiver])
+
+    # Check if both sender and receiver are in the call_connections list
+    for people in sorted_users:
+        if people not in call_connections:
+            call_connections.append(people)
+
+    # Return concatenated details in sorted order
+    return {"detail": f"{call_connections[call_connections.index(sorted_users[0])]} + {call_connections[call_connections.index(sorted_users[1])]}"}
+
 
 @app.get("/user-status/{email}")
 async def get_user_status(email: EmailStr):
@@ -167,14 +187,14 @@ async def join_chat(email: EmailStr, chat_data: dict, current_user: User = Depen
             raise HTTPException(status_code=400, detail="Chat ID is required")
         user_check = await user_collection.find({"email": chat_id}).to_list(length=None)
         if not user_check:
-            return []
+            return {"detail": "User Not Found"}
 
         result = await user_collection.update_one(
             {"email": email},
             {"$addToSet": {"chats": chat_id}}
         )
         if result.modified_count == 0:
-            return {"detail": "User not found or already in chat"}
+            return {"detail": "User already in chat"}
         return {"detail": "Chat joined successfully"}
     except Exception as e:
         logging.error(f"Error joining chat: {e}")

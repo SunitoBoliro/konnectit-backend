@@ -14,7 +14,8 @@ client = AsyncIOMotorClient(MONGO_URI)
 db = client["konnectit"]  # Database name
 user_collection = db["usersreg"]
 message_collection = db["messages"]
-calls_collection = db["calls"]
+# calls_collection = db["calls"]
+call_logs_collection = db['CallLogs']
 
 
 def serialize_user(user):
