@@ -30,7 +30,7 @@ def serialize_user(user):
 def serialize_message(message):
     return {
         "id": str(message["_id"]),
-        # "type": str(message["type"]),
+        "type": str(message["type"]),
         "chatId": str(message["chatId"]),
         "content": str(message["content"]),
         "timestamp": str(message["timestamp"]),
