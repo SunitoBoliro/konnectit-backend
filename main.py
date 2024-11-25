@@ -156,6 +156,25 @@ async def messages(chatId: EmailStr, sender_email: EmailStr, current_user: User 
 #         users["_id"] = str(users["_id"])
 #     return [serialize_user(user) for user in users]
 
+@app.post("/update/{image}/{email}")
+async def update_image(image: str, email: EmailStr, current_user: dict = Depends(get_current_user)):
+    # Fetch user document by email
+    result = await user_collection.find_one({"email": email})
+    
+    if not result:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Update the image field in the user's document
+    update_result = await user_collection.update_one(
+        {"email": email},
+        {"$set": {"image": image}}
+    )
+
+    if update_result.modified_count == 0:
+        raise HTTPException(status_code=400, detail="No changes were made")
+    
+    return {"detail": "Image updated successfully"}
+
 @app.get("/users/{email}", response_model=List[UserResponse])
 
 
