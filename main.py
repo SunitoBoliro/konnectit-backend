@@ -57,6 +57,8 @@ async def login(user: UserLogin):
     return await login_user(user)
 
 
+
+
 @app.get("/validate")
 async def validate_token(token: str = Query(...)):
     return await validate_token_endpoint(token)
@@ -154,9 +156,21 @@ async def messages(chatId: EmailStr, sender_email: EmailStr, current_user: User 
 #         users["_id"] = str(users["_id"])
 #     return [serialize_user(user) for user in users]
 
+@app.get("/own-user-info/{email}", response_model=List[UserResponse])
+async def own_user(email: EmailStr):
+    user = await user_collection.find_one(({
+        "email" : email
+    }))  # Return an empty list if the user is not found
+
+    # Convert the "_id" field to a string for the found user
+    user["_id"] = str(user["_id"])
+
+
+    # Filter and serialize users whose email matches any chats in the user's "chats"
+    return [serialize_user(own_info) for own_info in user]
+
+
 @app.get("/users/{email}", response_model=List[UserResponse])
-
-
 async def get_users(email: EmailStr):
     # Fetch the user with the specified email
     user = await user_collection.find_one({"email": email})
