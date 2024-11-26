@@ -26,6 +26,7 @@ class User(BaseModel):
     email: EmailStr
     hashed_password: str
     chats: List[PyObjectId] = []  # List of chat IDs
+    pp: str
 
     class Config:
         json_encoders = {ObjectId: str}

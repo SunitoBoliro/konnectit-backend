@@ -22,6 +22,7 @@ class UserCreate(BaseModel):
     username: str
     email: EmailStr
     password: str
+    pp: str
 
 
 
@@ -35,6 +36,7 @@ class UserResponse(BaseModel):
     id: str
     username: str
     email: EmailStr
+    pp:str
 
     class Config:
         json_encoders = {ObjectId: str}

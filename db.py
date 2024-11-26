@@ -24,6 +24,7 @@ def serialize_user(user):
         "username": user["username"],
         "email": user["email"],
         "chats": [str(chat) for chat in user.get("chats", [])],
+        "pp": str(user["pp"])
     }
 
 
@@ -35,6 +36,7 @@ def serialize_message(message):
         "content": str(message["content"]),
         "timestamp": str(message["timestamp"]),
         "sender": str(message["sender"]),
+
     }
 
 
