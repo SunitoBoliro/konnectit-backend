@@ -59,6 +59,8 @@ async def login(user: UserLogin):
     return await login_user(user)
 
 
+
+
 @app.get("/validate")
 async def validate_token(token: str = Query(...)):
     return await validate_token_endpoint(token)
@@ -156,28 +158,25 @@ async def messages(chatId: EmailStr, sender_email: EmailStr, current_user: User 
 #         users["_id"] = str(users["_id"])
 #     return [serialize_user(user) for user in users]
 
-@app.post("/update/{image}/{email}")
-async def update_image(image: str, email: EmailStr, current_user: dict = Depends(get_current_user)):
-    # Fetch user document by email
-    result = await user_collection.find_one({"email": email})
-    
-    if not result:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Update the image field in the user's document
-    update_result = await user_collection.update_one(
-        {"email": email},
-        {"$set": {"image": image}}
-    )
+@app.get("/own-user-info/{email}")
+async def own_user(email: EmailStr):
+    user = await user_collection.find_one(({
+        "email" : email
+    }))  # Return an empty list if the user is not found
 
-    if update_result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="No changes were made")
-    
-    return {"detail": "Image updated successfully"}
+    # Convert the "_id" field to a string for the found user
+    user["_id"] = str(user["_id"])
+
+
+    # Filter and serialize users whose email matches any chats in the user's "chats"
+    return [{
+        "username": user["username"],
+        "email": user["email"],
+        "pp": user["pp"],
+        }]
+
 
 @app.get("/users/{email}", response_model=List[UserResponse])
-
-
 async def get_users(email: EmailStr):
     # Fetch the user with the specified email
     user = await user_collection.find_one({"email": email})
