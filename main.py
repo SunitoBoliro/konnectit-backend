@@ -8,12 +8,13 @@ from fastapi import FastAPI, HTTPException, WebSocket, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import EmailStr
 from sse_starlette import EventSourceResponse
+from starlette import status
 
 from db import user_collection, serialize_user
 from get_current_user import get_current_user
 from get_messages import get_messages
 from login_user import login_user
-from models import User
+from models import User, ChangePPRequest
 from register_user import register_user
 from schemas import UserResponse, UserCreate, UserLogin
 from validate_token_endpoint import validate_token_endpoint
@@ -141,6 +142,7 @@ async def logout_user(email: EmailStr):
         user_status[email]["online"] = False
         user_status[email]["last_seen"] = datetime.now()
         logging.debug(f"Updated user {email} last seen time: {user_status[email]['last_seen']}")
+        
         return {"detail": "Successfully logged out"}
     else:
         raise HTTPException(status_code=404, detail="User not found")
@@ -158,10 +160,38 @@ async def messages(chatId: EmailStr, sender_email: EmailStr, current_user: User 
 #         users["_id"] = str(users["_id"])
 #     return [serialize_user(user) for user in users]
 
+
+@app.post("/change-pp")
+async def change_pp(request: ChangePPRequest):
+    x = await validate_token_endpoint(request.token)
+    if not x.get("isValid"):
+        logging.error("Invalid token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Find the user by email
+    user = await user_collection.find_one({"email": request.email})
+    if not user:
+        return {"detail": "User doesn't exist!"}
+
+    # Update the user's profile picture
+    result = await user_collection.update_one(
+        {"email": request.email},
+        {"$set": {"pp": request.pp}}
+    )
+
+    if result.modified_count == 1:
+        return {"detail": "Profile picture updated successfully!"}
+    else:
+        return {"detail": "Failed to update profile picture or no changes made."}
+
 @app.get("/own-user-info/{email}")
 async def own_user(email: EmailStr):
     user = await user_collection.find_one(({
-        "email" : email
+        "email": email
     }))  # Return an empty list if the user is not found
 
     # Convert the "_id" field to a string for the found user
@@ -173,7 +203,7 @@ async def own_user(email: EmailStr):
         "username": user["username"],
         "email": user["email"],
         "pp": user["pp"],
-        }]
+    }]
 
 
 @app.get("/users/{email}", response_model=List[UserResponse])
