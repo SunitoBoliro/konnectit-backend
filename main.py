@@ -251,7 +251,7 @@ async def join_chat(email: EmailStr, chat_data: dict, current_user: User = Depen
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/deletechathistory/{email}/")
+@app.delete("/deletechathistory/{email}/{chatId}/")
 async def delete_chat(email: EmailStr, chatId :EmailStr ):
     user_delete = await message_collection.find({"sender":email }).to_list(length= None)
     if not user_delete :
@@ -268,7 +268,7 @@ async def delete_chat(email: EmailStr, chatId :EmailStr ):
 
     
 
-@app.delete("/deleteuser/{email}/")
+@app.delete("/deleteuser/{email}/{current_user}/")
 async def delete_user(email: EmailStr, current_user: EmailStr):
     # Find the user by email to ensure they exist
     user = await user_collection.find_one({"email": current_user})
