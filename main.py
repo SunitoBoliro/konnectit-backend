@@ -10,7 +10,7 @@ from pydantic import EmailStr
 from sse_starlette import EventSourceResponse
 from starlette import status
 
-from db import user_collection, serialize_user
+from db import user_collection, serialize_user, message_collection
 from get_current_user import get_current_user
 from get_messages import get_messages
 from login_user import login_user
@@ -249,6 +249,43 @@ async def join_chat(email: EmailStr, chat_data: dict, current_user: User = Depen
     except Exception as e:
         logging.error(f"Error joining chat: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/deletechathistory/{email}/")
+async def delete_chat(email: EmailStr, chatId :EmailStr ):
+    user_delete = await message_collection.find({"sender":email }).to_list(length= None)
+    if not user_delete :
+        return {"detail": "User Not Found"}
+    result =  message_collection.delete_many({
+    "$or": [
+        {"chatId": chatId, "sender":email},
+        {"chatId":email, "sender":chatId}
+    ]
+})
+    # if result.deleted_count == 0:
+    #     return {"detail": "User already in chat"}
+    return {"detail": "Chat deleted successfully"}
+
+    
+
+@app.delete("/deleteuser/{email}/")
+async def delete_user(email: EmailStr, current_user: EmailStr):
+    # Find the user by email to ensure they exist
+    user = await user_collection.find_one({"email": current_user})
+    if not user:
+        return {"detail": "Current user not found"}
+    
+    # Remove the given email from the 'chats' array of the current user
+    result = await user_collection.update_one(
+        {"email": current_user},  # Match the current user's email
+        {"$pull": {"chats": email}}    # Remove the specific email from the chats array
+    )
+
+    if result.modified_count == 0:
+        return {"detail": "Email not found in chats"}
+
+    return {"detail": f"Email {email} removed from chats successfully"}
+
 
 
 if __name__ == "__main__":
