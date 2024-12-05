@@ -256,8 +256,8 @@ async def delete_email_from_identifier(email: EmailStr, chatId: EmailStr):
     # Find documents where:
     # 1. The identifier array contains both `email` and `chatId`
     query = {"$or": [
-                {"identifier": chatId},
-                {"identifier": email}
+                {"chatId": chatId, "sender": email},
+                {"chatId": email, "sender": chatId}
             ]}
 
     # Check if matching documents exist
@@ -281,7 +281,7 @@ async def delete_email_from_identifier(email: EmailStr, chatId: EmailStr):
             detail="Failed to remove email from identifier."
         )
 
-    return {"detail": f"Email '{email}' removed from {update_result.modified_count} documents successfully."}
+    return {"detail": "Chat History Cleared!"}
 
 @app.delete("/deleteuser/{email}/{current_user}/")
 async def delete_user(email: EmailStr, current_user: EmailStr):
