@@ -36,7 +36,7 @@ def serialize_message(message):
         "content": str(message["content"]),
         "timestamp": str(message["timestamp"]),
         "sender": str(message["sender"]),
-
+        "identifier": message["identifier"],
     }
 
 

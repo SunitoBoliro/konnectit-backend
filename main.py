@@ -10,7 +10,7 @@ from pydantic import EmailStr
 from sse_starlette import EventSourceResponse
 from starlette import status
 
-from db import user_collection, serialize_user, message_collection
+from db import user_collection, serialize_user, message_collection, serialize_message
 from get_current_user import get_current_user
 from get_messages import get_messages
 from login_user import login_user
@@ -40,7 +40,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # @app.on_event("startup")
 # async def startup_event():
 #     await seed_users()
@@ -50,6 +49,7 @@ active_connections: Dict[EmailStr, WebSocket] = {}
 active_webrtc_connections: Dict[str, WebSocket] = {}
 webrtc_sessions: Dict[str, Dict[EmailStr, bool]] = {}
 
+
 @app.post("/register", response_model=UserResponse)
 async def register(user: UserCreate):
     return await register_user(user)
@@ -58,8 +58,6 @@ async def register(user: UserCreate):
 @app.post("/login")
 async def login(user: UserLogin):
     return await login_user(user)
-
-
 
 
 @app.get("/validate")
@@ -78,6 +76,7 @@ async def websocket_communication(websocket: WebSocket, token: str):
 
 call_connections = []
 
+
 # @app.get("/calllogs/{}/{}/{}/{}/{}")
 
 @app.get("/room/{sender}/{receiver}")
@@ -94,7 +93,8 @@ async def room_id(sender: EmailStr, receiver: EmailStr):
             call_connections.append(people)
 
     # Return concatenated details in sorted order
-    return {"detail": f"{call_connections[call_connections.index(sorted_users[0])]} + {call_connections[call_connections.index(sorted_users[1])]}"}
+    return {
+        "detail": f"{call_connections[call_connections.index(sorted_users[0])]} + {call_connections[call_connections.index(sorted_users[1])]}"}
 
 
 @app.get("/user-status/{email}")
@@ -142,7 +142,7 @@ async def logout_user(email: EmailStr):
         user_status[email]["online"] = False
         user_status[email]["last_seen"] = datetime.now()
         logging.debug(f"Updated user {email} last seen time: {user_status[email]['last_seen']}")
-        
+
         return {"detail": "Successfully logged out"}
     else:
         raise HTTPException(status_code=404, detail="User not found")
@@ -188,6 +188,7 @@ async def change_pp(request: ChangePPRequest):
     else:
         return {"detail": "Failed to update profile picture or no changes made."}
 
+
 @app.get("/own-user-info/{email}")
 async def own_user(email: EmailStr):
     user = await user_collection.find_one(({
@@ -196,7 +197,6 @@ async def own_user(email: EmailStr):
 
     # Convert the "_id" field to a string for the found user
     user["_id"] = str(user["_id"])
-
 
     # Filter and serialize users whose email matches any chats in the user's "chats"
     return [{
@@ -252,21 +252,36 @@ async def join_chat(email: EmailStr, chat_data: dict, current_user: User = Depen
 
 
 @app.delete("/deletechathistory/{email}/{chatId}/")
-async def delete_chat(email: EmailStr, chatId :EmailStr ):
-    user_delete = await message_collection.find({"sender":email }).to_list(length= None)
-    if not user_delete :
-        return {"detail": "User Not Found"}
-    result =  message_collection.delete_many({
-    "$or": [
-        {"chatId": chatId, "sender":email},
-        {"chatId":email, "sender":chatId}
-    ]
-})
-    # if result.deleted_count == 0:
-    #     return {"detail": "User already in chat"}
-    return {"detail": "Chat deleted successfully"}
+async def delete_email_from_identifier(email: EmailStr, chatId: EmailStr):
+    # Find documents where:
+    # 1. The identifier array contains both `email` and `chatId`
+    query = {"$or": [
+                {"identifier": chatId},
+                {"identifier": email}
+            ]}
 
-    
+    # Check if matching documents exist
+    documents = await message_collection.find(query).to_list(length=None)
+
+    if not documents:
+        raise HTTPException(
+            status_code=404,
+            detail="No Chats found!"
+        )
+
+    # Remove the `email` from the identifier array in matching documents
+    update_result = await message_collection.update_many(
+        query,
+        {"$pull": {"identifier": email}}
+    )
+
+    if update_result.modified_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Failed to remove email from identifier."
+        )
+
+    return {"detail": f"Email '{email}' removed from {update_result.modified_count} documents successfully."}
 
 @app.delete("/deleteuser/{email}/{current_user}/")
 async def delete_user(email: EmailStr, current_user: EmailStr):
@@ -274,18 +289,17 @@ async def delete_user(email: EmailStr, current_user: EmailStr):
     user = await user_collection.find_one({"email": current_user})
     if not user:
         return {"detail": "Current user not found"}
-    
+
     # Remove the given email from the 'chats' array of the current user
     result = await user_collection.update_one(
         {"email": current_user},  # Match the current user's email
-        {"$pull": {"chats": email}}    # Remove the specific email from the chats array
+        {"$pull": {"chats": email}}  # Remove the specific email from the chats array
     )
 
     if result.modified_count == 0:
         return {"detail": "Email not found in chats"}
 
     return {"detail": f"Email {email} removed from chats successfully"}
-
 
 
 if __name__ == "__main__":

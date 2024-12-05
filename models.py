@@ -38,6 +38,11 @@ class ChangePPRequest(BaseModel):
     email: EmailStr
     token: str
 
+# class DeleteChatModel(BaseModel):
+#     email: EmailStr
+#     status: bool
+
+
 
 class Message(BaseModel):
     id: PyObjectId = Field(default_factory=PyObjectId, alias="_id")
