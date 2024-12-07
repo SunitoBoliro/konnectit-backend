@@ -28,7 +28,6 @@ class User(BaseModel):
     chats: List[PyObjectId] = []  # List of chat IDs
     pp: str
 
-
     class Config:
         json_encoders = {ObjectId: str}
 
@@ -37,6 +36,11 @@ class ChangePPRequest(BaseModel):
     pp: str
     email: EmailStr
     token: str
+
+
+class GroupChat(BaseModel):
+    chatName: str
+    participants: list
 
 
 class Message(BaseModel):
