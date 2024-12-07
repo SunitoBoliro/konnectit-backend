@@ -14,7 +14,7 @@ from db import user_collection, serialize_user, message_collection, serialize_me
 from get_current_user import get_current_user
 from get_messages import get_messages
 from login_user import login_user
-from models import User, ChangePPRequest
+from models import User, ChangePPRequest, GroupChat
 from register_user import register_user
 from schemas import UserResponse, UserCreate, UserLogin
 from validate_token_endpoint import validate_token_endpoint
@@ -160,7 +160,6 @@ async def messages(chatId: EmailStr, sender_email: EmailStr, current_user: User 
 #         users["_id"] = str(users["_id"])
 #     return [serialize_user(user) for user in users]
 
-
 @app.post("/change-pp")
 async def change_pp(request: ChangePPRequest):
     x = await validate_token_endpoint(request.token)
@@ -256,9 +255,9 @@ async def delete_email_from_identifier(email: EmailStr, chatId: EmailStr):
     # Find documents where:
     # 1. The identifier array contains both `email` and `chatId`
     query = {"$or": [
-                {"chatId": chatId, "sender": email},
-                {"chatId": email, "sender": chatId}
-            ]}
+        {"chatId": chatId, "sender": email},
+        {"chatId": email, "sender": chatId}
+    ]}
 
     # Check if matching documents exist
     documents = await message_collection.find(query).to_list(length=None)
@@ -282,6 +281,7 @@ async def delete_email_from_identifier(email: EmailStr, chatId: EmailStr):
         )
 
     return {"detail": "Chat History Cleared!"}
+
 
 @app.delete("/deleteuser/{email}/{current_user}/")
 async def delete_user(email: EmailStr, current_user: EmailStr):

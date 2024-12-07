@@ -16,6 +16,7 @@ user_collection = db["usersreg"]
 message_collection = db["messages"]
 # calls_collection = db["calls"]
 call_logs_collection = db['CallLogs']
+group_chat_collection = db["GroupChats"]
 
 
 def serialize_user(user):
