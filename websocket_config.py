@@ -12,7 +12,7 @@ from db import message_collection
 
 # Dictionary to store active WebSocket connections and user status
 active_connections: Dict[EmailStr, WebSocket] = {}
-user_status: Dict[EmailStr, dict] = {}  # Tracks online status and last seen time
+user_status: Dict[EmailStr, dict] = {}  # Tracks online status, last seen time, and unread message count
 
 async def websocket_endpoint(websocket: WebSocket, token: str):
     try:
@@ -28,8 +28,9 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         active_connections[current_user_email] = websocket
         logging.info(f"User {current_user_email} connected. Active connections: {list(active_connections.keys())}")
 
-        # Mark user as online and update status
-        user_status[current_user_email] = {"online": True, "last_seen": None}
+        # Mark user as online and initialize unread message count
+        if current_user_email not in user_status:
+            user_status[current_user_email] = {"online": True, "last_seen": None, "unread_count": 0}
         print(f"{current_user_email} is now online")
 
         try:
@@ -57,6 +58,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             user_status[current_user_email] = {
                 "online": False,
                 "last_seen": datetime.utcnow(),
+                "unread_count": user_status[current_user_email].get("unread_count", 0),
             }
             print(f"{current_user_email} went offline at {user_status[current_user_email]['last_seen']}")
     except JWTError as e:
@@ -93,8 +95,25 @@ async def broadcast(message: dict):
                 # Send the message to the user
                 await active_connections[user_email].send_text(json.dumps(message))
                 logging.info(f"Message sent to {user_email}")
+
+                # If the recipient is offline, increment unread count
+                if user_email != message["sender"]:
+                    if user_email not in user_status:
+                        user_status[user_email] = {"unread_count": 1, "online": False, "last_seen": None}
+                    else:
+                        user_status[user_email]["unread_count"] += 1
+
             except Exception as e:
                 # Error handling for failed message delivery
                 logging.error(f"Error sending message to {user_email}: {e}")
                 # Clean up broken connections
                 active_connections.pop(user_email, None)
+
+# Route to mark messages as read by the user
+@app.post("/mark_as_read/{user_email}")
+async def mark_messages_as_read(user_email: EmailStr):
+    """Mark messages as read and reset unread count for the user."""
+    if user_email in user_status:
+        user_status[user_email]["unread_count"] = 0
+        logging.info(f"Unread count for {user_email} reset to 0.")
+    return {"message": "Unread messages marked as read"}
