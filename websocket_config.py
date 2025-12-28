@@ -9,6 +9,9 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from auth import SECRET_KEY, ALGORITHM
 from db import message_collection
+from fastapi import APIRouter
+
+router = APIRouter()
 
 # Dictionary to store active WebSocket connections and user status
 active_connections: Dict[EmailStr, WebSocket] = {}
@@ -110,7 +113,7 @@ async def broadcast(message: dict):
                 active_connections.pop(user_email, None)
 
 # Route to mark messages as read by the user
-@app.post("/mark_as_read/{user_email}")
+@router.post("/mark_as_read/{user_email}")
 async def mark_messages_as_read(user_email: EmailStr):
     """Mark messages as read and reset unread count for the user."""
     if user_email in user_status:

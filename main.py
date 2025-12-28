@@ -18,9 +18,10 @@ from models import User, ChangePPRequest, GroupChat
 from register_user import register_user
 from schemas import UserResponse, UserCreate, UserLogin
 from validate_token_endpoint import validate_token_endpoint
-from websocket_config import websocket_endpoint, user_status
+from websocket_config import websocket_endpoint, user_status, router as websocket_router
 
 app = FastAPI()
+app.include_router(websocket_router)
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
